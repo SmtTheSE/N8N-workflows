@@ -1,0 +1,320 @@
+{
+  "name": "AI Agent Escalation Bot I",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent-escalation",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "dc9c2337-1f72-49e9-bbee-1b583d13651a",
+      "name": "Webhook",
+      "webhookId": "9eae35d1-6b53-4992-acd1-fbcff9679377"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an AI operations agent.\nReturn ONLY valid minified JSON with keys:\nintent (one of: support, billing, technical, sales, feedback, other)\nurgency (one of: urgent, high, normal, low)\nrisk_level (one of: high, medium, low)\nauto_action_allowed (boolean)\nrecommended_action (string, max 20 words)\nescalation_reason (string or null)\nresponse_draft (string, max 35 words)\nconfidence (0-1 number)\n\nRules:\n- Never output markdown\n- Never output explanation\n- If unsure, set risk_level=medium and auto_action_allowed=false\n- If urgency is urgent and user impact exists, escalate\n\nUser Input:\nRequest text: {{$json.body.text}}\nSource: {{$json.body.source}}\nRequester: {{$json.body.requester}}\nNow analyze and decide action.\n",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are an AI operations agent.\nReturn ONLY valid minified JSON with keys:\nintent (one of: support, billing, technical, sales, feedback, other)\nurgency (one of: urgent, high, normal, low)\nrisk_level (one of: high, medium, low)\nauto_action_allowed (boolean)\nrecommended_action (string, max 20 words)\nescalation_reason (string or null)\nresponse_draft (string, max 35 words)\nconfidence (0-1 number)\n\nRules:\n- Never output markdown\n- Never output explanation\n- If unsure, set risk_level=medium and auto_action_allowed=false\n- If urgency is urgent and user impact exists, escalate\n\nUser Input:\nRequest text: {{$json.body.text}}\nSource: {{$json.body.source}}\nRequester: {{$json.body.requester}}\nNow analyze and decide action.\n"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [416, 0],
+      "id": "eef7f3b9-b2e8-462c-8266-2a774bb3683b",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [416, 208],
+      "id": "fefb4aeb-986e-4074-abb9-312d9bd5c79b",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "UtFmYRWJPhMvfMwk",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  function findJsonString(obj) {\n    if (typeof obj === 'string' && obj.includes('{')) return obj;\n    if (obj && typeof obj === 'object') {\n      for (let key in obj) {\n        let found = findJsonString(obj[key]);\n        if (found) return found;\n      }\n    }\n    return null;\n  }\n\n  let rawAiOutput = findJsonString(item.json) || \"\";\n  rawAiOutput = rawAiOutput.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\n  let d;\n  try {\n    d = JSON.parse(rawAiOutput);\n  } catch (e) {\n    d = { \n      intent: \"other\", urgency: \"normal\", risk_level: \"medium\", \n      auto_action_allowed: false, recommended_action: \"Manual review required due to parsing failure\"\n    };\n  }\n\n  const pick = (v, allowed, fallback) => allowed.includes(v) ? v : fallback;\n\n  // Fix: Force string \"true\" to become mathematical true\n  const isAutoAllowed = (d.auto_action_allowed === true || d.auto_action_allowed === \"true\");\n\n  const out = {\n    intent: pick(d.intent, [\"support\",\"billing\",\"technical\",\"sales\",\"feedback\",\"other\"], \"other\"),\n    urgency: pick(d.urgency, [\"urgent\",\"high\",\"normal\",\"low\"], \"normal\"),\n    risk_level: pick(d.risk_level, [\"high\",\"medium\",\"low\"], \"medium\"),\n    auto_action_allowed: isAutoAllowed,\n    recommended_action: (d.recommended_action || \"Escalate for manual review\").toString(),\n    escalation_reason: d.escalation_reason ?? null,\n    response_draft: (d.response_draft || \"Thanks, we received your request and will follow up shortly.\").toString(),\n    confidence: typeof d.confidence === \"number\" ? d.confidence : 0.5\n  };\n\n  // Safety override\n  if (out.urgency === \"urgent\" || out.risk_level === \"high\") {\n    out.auto_action_allowed = false;\n    if (!out.escalation_reason) out.escalation_reason = \"Urgent or high-risk case\";\n  }\n\n  return { json: out };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [768, 0],
+      "id": "e25b9f60-d490-4897-8e5d-e965504a0ef0",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "AI_Agent_Escalation_Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ new Date().toISOString() }}",
+            "escalated": "={{ $json.risk_level === 'high' || $json.urgency === 'urgent' }}",
+            "reason": "={{ $json.escalation_reason || 'Auto-processed' }}",
+            "priority": "={{ $json.urgency }}",
+            "response_draft": "={{ $json.response_draft }}",
+            "intent": "={{ $json.intent }}",
+            "urgency": "={{ $json.urgency }}",
+            "risk_level": "={{ $json.risk_level }}",
+            "auto_action_allowed": "={{ $json.auto_action_allowed }}",
+            "recommended_action": "={{ $json.recommended_action }}",
+            "escalation_reason": "={{ $json.escalation_reason }}",
+            "confidence": "={{ $json.confidence }}"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1050, -150],
+      "id": "sheets-log-triage-001",
+      "name": "Log to Escalation Sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5555460f-6378-4d5b-8d29-e702c4ffbb03",
+              "leftValue": "={{ $json.auto_action_allowed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "b9af00cb-d1d4-4ee6-bf57-ba1bfdc86feb",
+              "leftValue": "={{ $json.risk_level }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "id": "29723c4f-8ac8-440f-ba5f-82c2498eead5",
+              "leftValue": "={{ $json.urgency }}",
+              "rightValue": "urgent",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [976, 0],
+      "id": "f5a8da93-a5cf-428e-a3c6-a3760aef2609",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "chatId": "1895930444",
+        "text": "=🚨 Escalation Needed Intent: {{$json.intent}} Urgency: {{$json.urgency}} Risk: {{$json.risk_level}} Action: {{$json.recommended_action}} Reason: {{$json.escalation_reason}} Draft reply: {{$json.response_draft}} Confidence: {{$json.confidence}}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [896, 176],
+      "id": "5440346a-5543-43be-b7c3-2ab8e7b697e2",
+      "name": "Send a text message",
+      "webhookId": "ad6543ad-f78b-4d9d-a5bd-e827e71db8ba",
+      "credentials": {
+        "telegramApi": {
+          "id": "sDGTlmQy7QbjvhSw",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cc2d7e9d-2112-4ac0-8bcd-f832a5979e2a",
+              "name": "",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1184, -96],
+      "id": "2995aa10-0a3e-4ea1-92a8-99554b446014",
+      "name": "Auto-Resolve Success"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1400, 0],
+      "id": "d0d0a459-80bc-4641-b9e0-743eaf74ad95",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log to Triage Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Auto-Resolve Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Resolve Success": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Triage Sheet": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "fc0caf60-c64b-46fc-9da9-eb5bcf34ac0f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7ea0a21d5077ba9781c7819125776e25a186c2656c760490f5d4fd2cc72c176d"
+  },
+  "id": "nGCfsZqLLPMAyACC",
+  "tags": []
+}

@@ -1,0 +1,390 @@
+{
+  "name": "AI Agent Ops & KPI Dashboard Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "id": "cron-kpi-001",
+      "name": "Cron Trigger"
+    },
+    {
+      "parameters": {
+        "manual": true
+      },
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "id": "manual-kpi-001",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "AI_Task_Triage_Log"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [400, -200],
+      "id": "sheets-triage-001",
+      "name": "Task Triage Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "AI_Agent_Escalation_Log"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [400, -50],
+      "id": "sheets-escalation-001",
+      "name": "Escalation Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "AI_Knowledge_Agent_Log"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [400, 100],
+      "id": "sheets-knowledge-001",
+      "name": "Knowledge Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "AI_Inbox_Summary_Log"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [400, 250],
+      "id": "sheets-inbox-001",
+      "name": "Inbox Log",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Inputs: 4 separate connections from Sheets/DB nodes\n// Use named inputs in n8n or connect sequentially and tag each via 'source' field.\n\nconst triage = $input.all()[0];       // Project 1\nconst escalation = $input.all()[1];   // Project 2\nconst knowledge = $input.all()[2];    // Project 3\nconst inbox = $input.all()[3];        // Project 4\n\nfunction extractJson(items) {\n  if (!items) return [];\n  if (Array.isArray(items)) {\n    return items.map(i => i.json);\n  }\n  return [items.json];\n}\n\nreturn [\n  {\n    json: {\n      generated_at: new Date().toISOString(),\n      window: \"last_24h\",\n      project1_triage: extractJson(triage),\n      project2_escalation: extractJson(escalation),\n      project3_knowledge: extractJson(knowledge),\n      project4_inbox: extractJson(inbox),\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 0],
+      "id": "code-consolidate-001",
+      "name": "Consolidate All Logs"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an AI ops analyst for a CEO.\n\nYou will receive structured log data from 4 AI agents:\n- project1_triage: task triage events\n- project2_escalation: agent escalation decisions\n- project3_knowledge: knowledge summaries\n- project4_inbox: inbox summaries\n\nReturn ONLY a valid minified JSON object with keys:\ndate (string, ISO date for this report)\nwindow_label (string, e.g. \"last_24h\" or \"last_7d\")\nheadline (string, max 25 words - CEO-level headline)\nkpi_summary (object) with keys:\n  total_tasks (number)\n  triage_tasks (number)\n  escalations (number)\n  auto_resolved (number)\n  high_importance_knowledge_items (number)\n  inbox_summaries (number)\nnarrative (string, max 250 words explaining what happened)\ntop_incidents (array of 3-10 short strings summarizing critical incidents or themes)\nrisks (array of strings, can be empty)\nimprovement_suggestions (array of 3-7 short action suggestions for the team)\n\nRules:\n- Never output markdown.\n- Never output explanations outside the JSON.\n- If some data is missing, estimate conservatively and mention this in the narrative.\n\nHere is the input JSON:\n{{$json}}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are an AI ops analyst for a CEO.\n\nYou will receive structured log data from 4 AI agents:\n- project1_triage: task triage events\n- project2_escalation: agent escalation decisions\n- project3_knowledge: knowledge summaries\n- project4_inbox: inbox summaries\n\nReturn ONLY a valid minified JSON object with keys:\ndate (string, ISO date for this report)\nwindow_label (string, e.g. \"last_24h\" or \"last_7d\")\nheadline (string, max 25 words - CEO-level headline)\nkpi_summary (object) with keys:\n  total_tasks (number)\n  triage_tasks (number)\n  escalations (number)\n  auto_resolved (number)\n  high_importance_knowledge_items (number)\n  inbox_summaries (number)\nnarrative (string, max 250 words explaining what happened)\ntop_incidents (array of 3-10 short strings summarizing critical incidents or themes)\nrisks (array of strings, can be empty)\nimprovement_suggestions (array of 3-7 short action suggestions for the team)\n\nRules:\n- Never output markdown.\n- Never output explanations outside the JSON.\n- If some data is missing, estimate conservatively and mention this in the narrative.\n\nHere is the input JSON:\n{{$json}}"
+            }
+          ]
+        },
+        "batching": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [1100, 0],
+      "id": "llm-kpi-001",
+      "name": "AI KPI Summary"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [1100, 200],
+      "id": "gemini-kpi-001",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "google-gemini-cred",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  function findJsonString(obj) {\n    if (typeof obj === 'string' && obj.includes('{')) return obj;\n    if (obj && typeof obj === 'object') {\n      for (const k in obj) {\n        const found = findJsonString(obj[k]);\n        if (found) return found;\n      }\n    }\n    return null;\n  }\n\n  let raw = findJsonString(item.json) || \"\";\n  raw = raw.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\n  let d;\n  try {\n    d = JSON.parse(raw);\n  } catch (e) {\n    d = {\n      date: new Date().toISOString().slice(0,10),\n      window_label: \"unknown\",\n      headline: \"Failed to parse KPI summary.\",\n      kpi_summary: {\n        total_tasks: 0,\n        triage_tasks: 0,\n        escalations: 0,\n        auto_resolved: 0,\n        high_importance_knowledge_items: 0,\n        inbox_summaries: 0,\n      },\n      narrative: \"\",\n      top_incidents: [],\n      risks: [],\n      improvement_suggestions: []\n    };\n  }\n\n  const kpi = d.kpi_summary || {};\n  const num = (v) => (typeof v === 'number' ? v : 0);\n\n  return {\n    json: {\n      date: String(d.date || new Date().toISOString().slice(0,10)),\n      window_label: String(d.window_label || \"last_24h\"),\n      headline: String(d.headline || \"\"),\n      kpi_summary: {\n        total_tasks: num(kpi.total_tasks),\n        triage_tasks: num(kpi.triage_tasks),\n        escalations: num(kpi.escalations),\n        auto_resolved: num(kpi.auto_resolved),\n        high_importance_knowledge_items: num(kpi.high_importance_knowledge_items),\n        inbox_summaries: num(kpi.inbox_summaries),\n      },\n      narrative: String(d.narrative || \"\"),\n      top_incidents: Array.isArray(d.top_incidents) ? d.top_incidents.map(String) : [],\n      risks: Array.isArray(d.risks) ? d.risks.map(String) : [],\n      improvement_suggestions: Array.isArray(d.improvement_suggestions) ? d.improvement_suggestions.map(String) : []\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 0],
+      "id": "code-validate-kpi-001",
+      "name": "Validate KPI Output"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "AI_Agent_KPI_Reports"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {}
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1800, -100],
+      "id": "sheets-log-kpi-001",
+      "name": "Log KPI Report",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "1895930444",
+        "text": "={{ `📈 AI Agent Ops Report (` + $json.date + ` – ` + $json.window_label + `)\n\n` + $json.headline + `\n\n📊 KPI:\n• Total tasks: ` + $json.kpi_summary.total_tasks + `\n• Triage tasks: ` + $json.kpi_summary.triage_tasks + `\n• Escalations: ` + $json.kpi_summary.escalations + `\n• Auto-resolved: ` + $json.kpi_summary.auto_resolved + `\n• Knowledge items: ` + $json.kpi_summary.high_importance_knowledge_items + `\n• Inbox summaries: ` + $json.kpi_summary.inbox_summaries + `\n\n🎯 Top Incidents:\n` + ($json.top_incidents.length > 0 ? $json.top_incidents.slice(0, 3).map(i => `• ${i}`).join('\\n') : '• None') + `\n\n⚠️ Risks: ` + ($json.risks.length > 0 ? $json.risks.map(r => `• ${r}`).join('\\n') : '• None flagged') + `\n\n💡 Suggestions:\n` + ($json.improvement_suggestions.length > 0 ? $json.improvement_suggestions.slice(0, 3).map(s => `• ${s}`).join('\\n') : '• None') }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1800, 100],
+      "id": "telegram-kpi-001",
+      "name": "Telegram CEO Digest",
+      "webhookId": "telegram-kpi-webhook",
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-cred",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Task Triage Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Escalation Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Knowledge Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Inbox Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Task Triage Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Escalation Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Knowledge Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Inbox Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Task Triage Log": {
+      "main": [
+        [
+          {
+            "node": "Consolidate All Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalation Log": {
+      "main": [
+        [
+          {
+            "node": "Consolidate All Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Knowledge Log": {
+      "main": [
+        [
+          {
+            "node": "Consolidate All Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inbox Log": {
+      "main": [
+        [
+          {
+            "node": "Consolidate All Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI KPI Summary",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI KPI Summary": {
+      "main": [
+        [
+          {
+            "node": "Validate KPI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate KPI Output": {
+      "main": [
+        [
+          {
+            "node": "Log KPI Report",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram CEO Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "kpi-dashboard-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "AI-KPI-Dashboard-001",
+  "tags": []
+}

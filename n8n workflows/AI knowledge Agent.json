@@ -1,0 +1,409 @@
+{
+  "name": "AI knowledge Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "knowledge-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -848,
+        112
+      ],
+      "id": "52dc9d00-0134-4bf7-8a89-b1be01d32867",
+      "name": "Webhook",
+      "webhookId": "7e602425-1cba-4829-be47-4c5ec007239c"
+    },
+    {
+      "parameters": {
+        "url": "={{$json[\"url\"]}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -656,
+        112
+      ],
+      "id": "0026e3aa-a177-4f4d-acbd-065efc9ec2da",
+      "name": "HTTP Request",
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Webhook wraps POST body fields inside j.body\nconst j = $input.first().json;\nconst body = j.body || j; // fallback to j directly if no body wrapper\n\nreturn [{\n  json: {\n    source: body.source || \"manual\",\n    title: body.title || \"Untitled Insight\",\n    url: body.url || null,\n    requester: body.requester || \"unknown\",\n    combined_text: body.raw_text || \"\"\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        112
+      ],
+      "id": "75d55a48-ade4-47e0-8483-34693800540b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an AI knowledge and research summarization agent.\n\nReturn ONLY a valid minified JSON object with the following keys:\ntopic (string)\nimportance (one of: low, medium, high)\nsummary (string, max 200 words)\nkey_points (array of 3-7 short bullet strings)\ndecisions (array of strings, can be empty)\naction_items (array of objects with keys: description, owner_suggestion, due_date_iso)\nrisks (array of strings, can be empty)\nsuggested_owner (string)\n\nRules:\n- Never output markdown.\n- Never output explanation.\n- If unsure, set importance to \"medium\".\n- If no decisions/actions, return empty arrays.\n\nContext:\nSource: {{$json.source}}\nTitle: {{$json.title}}\nURL: {{$json.url}}\nRequester: {{$json.requester}}\n\nFull Text:\n{{$json.combined_text}}\n"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        -288,
+        112
+      ],
+      "id": "0508e8c8-9090-48ed-ab12-d9e84dbd32da",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "UtFmYRWJPhMvfMwk",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  function findJsonString(obj) {\n    if (typeof obj === 'string' && obj.includes('{')) return obj;\n    if (obj && typeof obj === 'object') {\n      for (let k in obj) {\n        const found = findJsonString(obj[k]);\n        if (found) return found;\n      }\n    }\n    return null;\n  }\n\n  let raw = findJsonString(item.json) || \"\";\n  raw = raw.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\n  let d;\n  try {\n    d = JSON.parse(raw);\n  } catch (e) {\n    d = {\n      topic: item.json.title || \"Untitled\",\n      importance: \"medium\",\n      summary: \"Failed to parse AI output.\",\n      key_points: [],\n      decisions: [],\n      action_items: [],\n      risks: [],\n      suggested_owner: \"unassigned\"\n    };\n  }\n\n  const pick = (v, allowed, fallback) => allowed.includes(v) ? v : fallback;\n\n  const normalized = {\n    topic: String(d.topic || item.json.title || \"Untitled\"),\n    importance: pick(d.importance || \"medium\", [\"low\",\"medium\",\"high\"], \"medium\"),\n    summary: String(d.summary || \"No summary provided.\"),\n    key_points: Array.isArray(d.key_points) ? d.key_points.map(String) : [],\n    decisions: Array.isArray(d.decisions) ? d.decisions.map(String) : [],\n    action_items: Array.isArray(d.action_items) ? d.action_items.map(a => ({\n      description: String(a.description || \"\"),\n      owner_suggestion: String(a.owner_suggestion || d.suggested_owner || \"unassigned\"),\n      due_date_iso: a.due_date_iso || null,\n    })) : [],\n    risks: Array.isArray(d.risks) ? d.risks.map(String) : [],\n    suggested_owner: String(d.suggested_owner || \"unassigned\")\n  };\n\n  return { json: normalized };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        112
+      ],
+      "id": "1819a2e5-43b4-487d-875d-e78c62ee23df",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6e67836c-e157-45ff-baa8-067d0970b4fb",
+              "leftValue": "={{ $json.importance }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        176,
+        112
+      ],
+      "id": "c5fb9ead-d9ac-4569-a8a9-ea84b7e84329",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "chatId": "1895930444",
+        "text": "=📌 [{{$json.importance}}] {{$json.topic}}\nSummary: {{$json.summary}}\n\nKey points:\n- {{$json.key_points[0]}}\n- {{$json.key_points[1]}}\n- {{$json.key_points[2]}}\n\nOwner: {{$json.suggested_owner}}\n",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        480,
+        -16
+      ],
+      "id": "f243f1b9-269a-4ec2-8dee-a140d8201287",
+      "name": "Send a text message",
+      "webhookId": "42c8dfb4-303a-41ed-9574-1055e66e143c",
+      "credentials": {
+        "telegramApi": {
+          "id": "sDGTlmQy7QbjvhSw",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qsVrYgd-wsKV7Oc8jJeTtpNYk_YP6671nn9R5B0D3h8",
+          "mode": "list",
+          "cachedResultName": " Knowledge Agent Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qsVrYgd-wsKV7Oc8jJeTtpNYk_YP6671nn9R5B0D3h8/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qsVrYgd-wsKV7Oc8jJeTtpNYk_YP6671nn9R5B0D3h8/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "topic",
+              "displayName": "topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "importance",
+              "displayName": "importance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "decisions",
+              "displayName": "decisions",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "action_items",
+              "displayName": "action_items",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "risks",
+              "displayName": "risks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "suggested_owner",
+              "displayName": "suggested_owner",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "key_points",
+              "displayName": "key_points",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        656,
+        272
+      ],
+      "id": "e5e20ca1-931f-4d68-a1c6-61f2e9c2b438",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9DdIq7WEPeBww7CR",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        288
+      ],
+      "id": "6abc2b55-9962-41d1-b14b-15b0fa167586",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "d55b8b15-2a45-4559-b219-bf4465199dd9",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7ea0a21d5077ba9781c7819125776e25a186c2656c760490f5d4fd2cc72c176d"
+  },
+  "id": "a4OB3CFIROAMPos8",
+  "tags": []
+}

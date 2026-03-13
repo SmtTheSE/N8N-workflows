@@ -1,0 +1,274 @@
+{
+  "name": "Autonomous AI Task Triage Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ask-triage",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-320, -16],
+      "id": "3683cc75-e23f-482a-a138-ab3900df2a6c",
+      "name": "Webhook",
+      "webhookId": "b2dd8027-2451-46b0-ac96-728a4232c2de"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "You are a task triage assistant.\nReturn ONLY valid minified JSON with these keys:\npriority (one of: urgent, high, normal, low)\ncategory (one of: bug, feature, content, ops, meeting, admin, other)\nowner_suggestion (string)\ndeadline_iso (ISO-8601 date string or null)\nnext_action (string, max 20 words)\nsummary (string, max 25 words)\nconfidence (0-1 number)\n\nRules:\n- Never output markdown\n- Never output explanation\n- If deadline unclear, deadline_iso = null\n"
+            }
+          ]
+        },
+        "builtInTools": {
+          "codeExecution": false
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [-48, -16],
+      "id": "e11b9d16-5ca4-4e22-8f47-8e383b962e8e",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "UtFmYRWJPhMvfMwk",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/* 1. Works in 'Run Once for All Items' mode (default) */\nreturn $input.all().map(item => {\n  \n  // A function that hunts for a JSON string inside any object\n  function findJsonString(obj) {\n    if (typeof obj === 'string' && obj.includes('{')) return obj;\n    if (obj && typeof obj === 'object') {\n      for (let key in obj) {\n        let found = findJsonString(obj[key]);\n        if (found) return found;\n      }\n    }\n    return null;\n  }\n\n  // 2. Hunt for the AI's response string\n  let rawAiOutput = findJsonString(item.json) || \"\";\n\n  // Clean up any markdown logic\n  rawAiOutput = rawAiOutput.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\n  let d;\n  try {\n    // 3. Try to parse it\n    d = JSON.parse(rawAiOutput);\n  } catch (e) {\n    // Ultimate fallback if we still can't find it\n    d = { priority: \"normal\", summary: \"Hunt failed - click 'Input' tab to see data\" };\n  }\n\n  const pick = (v, allowed, fallback) => (allowed && allowed.includes(v)) ? v : fallback;\n\n  // 4. Return the structured fields\n  return {\n    json: {\n      priority: pick(d.priority, [\"urgent\",\"high\",\"normal\",\"low\"], \"normal\"),\n      category: pick(d.category, [\"bug\",\"feature\",\"content\",\"ops\",\"meeting\",\"admin\",\"other\"], \"other\"),\n      owner_suggestion: (d.owner_suggestion || \"unassigned\").toString(),\n      deadline_iso: d.deadline_iso || null,\n      next_action: (d.next_action || \"Review manually\").toString(),\n      summary: (d.summary || d.text || \"No summary found\"),\n      confidence: typeof d.confidence === \"number\" ? d.confidence : 0.5\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [288, -16],
+      "id": "aa6fc811-41c5-40ef-aae6-3e63f19c19d5",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "AI_Task_Triage_Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ new Date().toISOString() }}",
+            "escalated": "={{ $json.priority === 'urgent' || $json.priority === 'high' }}",
+            "reason": "={{ 'Task triage: ' + $json.category }}",
+            "priority": "={{ $json.priority }}",
+            "response_draft": "={{ $json.next_action }}",
+            "intent": "={{ $json.category }}",
+            "urgency": "={{ $json.priority }}",
+            "risk_level": "={{ $json.priority === 'urgent' ? 'high' : ($json.priority === 'high' ? 'medium' : 'low') }}",
+            "auto_action_allowed": "={{ $json.priority !== 'urgent' }}",
+            "recommended_action": "={{ $json.next_action }}",
+            "escalation_reason": "={{ $json.priority === 'urgent' ? 'High priority task' : null }}",
+            "category": "={{ $json.category }}",
+            "owner_suggestion": "={{ $json.owner_suggestion }}",
+            "deadline_iso": "={{ $json.deadline_iso }}",
+            "next_action": "={{ $json.next_action }}",
+            "summary": "={{ $json.summary }}",
+            "confidence": "={{ $json.confidence }}"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [500, -200],
+      "id": "sheets-log-triage-bot-001",
+      "name": "Log Task to Sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "1895930444",
+        "text": "=[{{$json.priority}}] {{$json.category}} - {{$json.summary}} | action: {{$json.next_action}}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [512, -16],
+      "id": "3fa125a3-7a90-45dc-8e5e-a0d774f81ec4",
+      "name": "Send a text message",
+      "webhookId": "d0d17bf5-88c4-4caf-95e0-2ca57c6c6542",
+      "credentials": {
+        "telegramApi": {
+          "id": "sDGTlmQy7QbjvhSw",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [720, -16],
+      "id": "ed57469d-2195-498c-a2ec-40d56ab7c261",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8f6f5905-407f-4497-b0df-366e7b25278d",
+              "leftValue": "={{ $json.priority }}",
+              "rightValue": "urgent",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "3194983a-195f-4749-a354-ce3522f495ae",
+              "leftValue": "={{ $json.priority }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [528, 224],
+      "id": "fb3dc4f3-3fd2-4d2d-8f2f-66cb853da140",
+      "name": "If"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Task to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Task to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "4ae2a376-e555-40aa-88cd-c5ab53087cf8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7ea0a21d5077ba9781c7819125776e25a186c2656c760490f5d4fd2cc72c176d"
+  },
+  "id": "gupZ5tH3NsAoyVJn",
+  "tags": []
+}
